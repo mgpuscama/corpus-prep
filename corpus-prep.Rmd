@@ -1,0 +1,69 @@
+---
+title: "corpus-prep"
+author: "M. Gabriela Puscama"
+date: "8/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r Load Packages}
+
+library(tidyverse)
+library(stringr)
+
+```
+
+Each txt file contains five columns without headers: Col 1 = textID, Col 2 = IDseq, Col 3 = word, Col 4 = lemma, Col 5 = PoS (Part of Speech). Some of the rows are not complete, because they are dividing each text. For R to be able to read the files, we need to specify "fill = TRUE" in the read.table function, so that it adds NAs to those "empty" cells.
+```{r Load Data}
+
+data <-read.table("./data/formatted/combined_VE2_clean.txt", header = FALSE, se="\t", fill = TRUE)
+
+```
+
+When opening the txt files, R adds extra rows that repeat include combined information from different cells. We need to filter those out and keep only the ones that include the accurate formatting. We are not losing any data by doing this, because those extra rows just repeat information, e.g. if row 1 is "3040 2434 rocks rock noun", then row 3 may be "3040/rock/noun/rocks/2434". To get rid of those, we create a vector with the possible textID numbers, and give it a very high limit, in this case, 3 * 10^6. We know that that's much higher that any textID, so it will include all of them, and exclude anything that's not numeric (i.e., cells that combine random numbers and text).
+
+We also filter out words that are punctuation symbols, to keep the word count more accurate. Since R doesn't have a complementary operator for %in%, we create one called %notin%. 
+```{r Data Wrangling}
+
+IDs <- seq(1, 3*(10^6), 1) #Create vector to filter out non-numeric textIDs
+
+punctuation <- as.factor(c("," , "." , "-", "(" , ")", "@", "_", "[", "]", ";", "=", "$")) #Create vector to filter out punctuation and symbols from the word column
+
+'%notin%' <- Negate('%in%') #Create operator
+
+data_clean <- data %>% #Update line based on the dataset.
+  rename(textID = V1, IDseq = V2, word = V3, lemma = V4, PoS = V5) %>% #Add column names
+  filter(textID %in% IDs) %>% #Exclude non-numeric textIDs
+  filter(word %notin% punctuation) %>% #Exclude punctuation and symbols from word column
+  select(textID, lemma) %>% #Keep columns of interest
+  group_by(textID) %>% #Group by textID, to combine all lemmas from the same text into a single vector
+  summarize(string = paste(lemma, collapse = " ")) %>% #Create new column that replaces the lemma column by combining all lemmas from the same text into a single vector
+  select(string) #Keep only string column (lemma strings per text)
+
+```
+
+We save the clean data sets (strings only), and then concatenate using Unix.
+```{r Save Clean Data Sets}
+
+write.table(data_clean, "./data/combined_VE2_clean.txt", col.names=FALSE, row.names=FALSE)
+
+```
+
+Finally, we reopen the concatenated file and eliminate diacritics (if we ask the model to ignore diacritics, it removes the letter with diacritic from the word, e.g., oración -> oracin). This way we won't have reliable counts, because there will never be a match. We replace letters with diacritics with double letters, to avoid confusion between homographs.
+```{r Remove diacritics from full data set and save}
+
+data <-read.table("./data/full_corpus_lemmas_raw.txt", header = FALSE, se="\t", fill = TRUE)
+
+data <- as.data.frame(unique(data$V1)) # When the files were concatenated, some lines were repeated, so we eliminate them here.
+
+write.table(data, "./data/full_corpus_final.txt", col.names=FALSE, row.names=FALSE) #Save formatted data with original lemmas
+
+data_no_accents <- data %>%
+  mutate(V1 = str_replace_all(string = V1, pattern = c('á' = "aa", 'ä' = "aa", 'é' = "ee", 'ë' = "ee", 'í' = "ii", 'ï' = "ii", 'ó' = "oo", 'ö' = "oo", 'ú' = "uu", 'ü' = "uu",  'ñ' = "nn")))
+
+write.table(data_no_accents, "./data/full_corpus_no_accents_final.txt", col.names=FALSE, row.names=FALSE) #Save formatted data without diacritics
+
+```
